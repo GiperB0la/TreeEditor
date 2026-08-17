@@ -66,7 +66,7 @@ add_executable(TreeManagerTest
     src/tree/TreeManager.cpp
 )
 
-target_link_libraries(TreeEditorTest
+target_link_libraries(TreeManagerTest
     PRIVATE
         Qt6::Core
         Qt6::Sql
