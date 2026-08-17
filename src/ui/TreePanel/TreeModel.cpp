@@ -10,7 +10,14 @@ TreeModel::TreeModel(QObject *parent)
 void TreeModel::setNodes(const QVector<NodeData> &nodes)
 {
     beginResetModel();
+
     nodes_ = nodes;
+
+    for (NodeData &node : nodes_)
+    {
+        node.leaves.detach();
+    }
+
     endResetModel();
 }
 
@@ -280,16 +287,27 @@ void TreeModel::updateLeaf(
         return;
     }
 
-    NodeData& node = nodes_[nodeRow];
+    NodeData &node = nodes_[nodeRow];
 
     if (leafRow < 0 || leafRow >= node.leaves.size())
     {
         return;
     }
 
-    beginResetModel();
-
     node.leaves[leafRow] = leaf;
 
-    endResetModel();
+    const QModelIndex nameIndex = createIndex(
+        leafRow,
+        0,
+        &node.leaves[leafRow]);
+
+    const QModelIndex valueIndex = createIndex(
+        leafRow,
+        1,
+        &node.leaves[leafRow]);
+
+    emit dataChanged(
+        nameIndex,
+        valueIndex,
+        {Qt::DisplayRole});
 }
