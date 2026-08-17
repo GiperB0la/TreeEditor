@@ -4,10 +4,10 @@
 
 ## Контакты
 
-**Telegram:** @Giperbooola
-**Телефон:** +7 910 892 5584
-**Email:** [giperbola.cpp@gmail.com](mailto:giperbola.cpp@gmail.com)
-**Резюме:** https://hh.ru/resume/9133f0d7ff0d6131490039ed1f65336a695331?hhtmFrom=applicant_profile
+**Telegram:** @Giperbooola  
+**Телефон:** +7 910 892 5584  
+**Email:** [giperbola.cpp@gmail.com](mailto:giperbola.cpp@gmail.com)  
+**Резюме:** https://hh.ru/resume/9133f0d7ff0d6131490039ed1f65336a695331?hhtmFrom=applicant_profile  
 
 ## Задание
 
