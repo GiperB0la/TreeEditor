@@ -1,0 +1,11 @@
+CREATE TABLE nodes (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL
+);
+
+CREATE TABLE leaves (
+    id SERIAL PRIMARY KEY,
+    node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    value DOUBLE PRECISION NOT NULL
+);
