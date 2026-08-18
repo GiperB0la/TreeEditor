@@ -1,9 +1,12 @@
 #include <QtTest>
-#include <QSqlDatabase>
-#include <QSqlError>
-#include <QSqlQuery>
 
 #include "../src/tree/TreeManager.hpp"
+#include "../src/database/TreeRepository.hpp"
+
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QSqlDatabase>
+#include <QTemporaryDir>
 
 class TreeManagerTest : public QObject
 {
@@ -11,359 +14,335 @@ class TreeManagerTest : public QObject
 
 private:
     QSqlDatabase database_;
-    TreeRepository* repository_ = nullptr;
-    TreeManager* manager_ = nullptr;
+    QString connectionName_;
 
-private slots:
-    void initTestCase();
-    void cleanupTestCase();
-
-    void init();
-    void cleanup();
-
-    void filterByName();
-    void filterByValue();
-    void filterByNameAndValue();
-    void filterWithoutFilters();
-
-    void nodeCount();
-    void leafCount();
-    void minimumValue();
-    void maximumValue();
-
-    void addAndDeleteLeaf();
-    void updateLeaf();
-    void deleteNodeWithLeaves();
-};
-
-void TreeManagerTest::initTestCase()
-{
-    database_ = QSqlDatabase::addDatabase("QPSQL", "TreeManagerTest");
-
-    database_.setHostName(qEnvironmentVariable("TEST_DB_HOST", "localhost"));
-    database_.setPort(qEnvironmentVariableIntValue("TEST_DB_PORT"));
-    database_.setDatabaseName(qEnvironmentVariable("TEST_DB_NAME", "treeeditor_test"));
-    database_.setUserName(qEnvironmentVariable("TEST_DB_USER", "postgres"));
-    database_.setPassword(qEnvironmentVariable("TEST_DB_PASSWORD", "postgres"));
-
-    if (database_.port() == -1)
+    void createTables()
     {
-        database_.setPort(5432);
+        QSqlQuery query(database_);
+
+        QVERIFY(query.exec(
+            "CREATE TABLE nodes ("
+            "id SERIAL PRIMARY KEY,"
+            "name TEXT NOT NULL"
+            ")"));
+
+        QVERIFY(query.exec(
+            "CREATE TABLE leaves ("
+            "id SERIAL PRIMARY KEY,"
+            "node_id INTEGER REFERENCES nodes(id) ON DELETE CASCADE,"
+            "name TEXT NOT NULL,"
+            "value DOUBLE PRECISION"
+            ")"));
     }
 
-    QVERIFY2(
-        database_.open(),
-        qPrintable(database_.lastError().text()));
-
-    repository_ = new TreeRepository(database_);
-    manager_ = new TreeManager(*repository_);
-}
-
-void TreeManagerTest::cleanupTestCase()
-{
-    delete manager_;
-    delete repository_;
-
-    database_.close();
-    QSqlDatabase::removeDatabase("TreeManagerTest");
-}
-
-void TreeManagerTest::init()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec("DELETE FROM leaves"));
-    QVERIFY(query.exec("DELETE FROM nodes"));
-
-    QVERIFY(query.exec(
-        "ALTER SEQUENCE nodes_id_seq RESTART WITH 1"));
-
-    QVERIFY(query.exec(
-        "ALTER SEQUENCE leaves_id_seq RESTART WITH 1"));
-
-    QVERIFY(manager_->load());
-}
-
-void TreeManagerTest::cleanup()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec("DELETE FROM leaves"));
-    QVERIFY(query.exec("DELETE FROM nodes"));
-}
-
-void TreeManagerTest::filterByName()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'Apple', 10.0), "
-        "       (1, 'Banana', 20.0), "
-        "       (1, 'Pineapple', 30.0)"));
-
-    QVERIFY(manager_->load());
-
-    const QVector<NodeData> result =
-        manager_->filter("apple", "");
-
-    QCOMPARE(result.size(), 1);
-    QCOMPARE(result[0].leaves.size(), 2);
-
-    QCOMPARE(result[0].leaves[0].name, QString("Apple"));
-    QCOMPARE(result[0].leaves[1].name, QString("Pineapple"));
-}
-
-void TreeManagerTest::filterByValue()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'First', 10.5), "
-        "       (1, 'Second', 25.0), "
-        "       (1, 'Third', 125.5)"));
-
-    QVERIFY(manager_->load());
-
-    const QVector<NodeData> result =
-        manager_->filter("", "25");
-
-    QCOMPARE(result.size(), 1);
-    QCOMPARE(result[0].leaves.size(), 2);
-
-    QCOMPARE(result[0].leaves[0].name, QString("Second"));
-    QCOMPARE(result[0].leaves[1].name, QString("Third"));
-}
-
-void TreeManagerTest::filterByNameAndValue()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'Apple', 10.0), "
-        "       (1, 'Apple Red', 20.0), "
-        "       (1, 'Banana', 10.0)"));
-
-    QVERIFY(manager_->load());
-
-    const QVector<NodeData> result =
-        manager_->filter("apple", "10");
-
-    QCOMPARE(result.size(), 1);
-    QCOMPARE(result[0].leaves.size(), 1);
-
-    QCOMPARE(result[0].leaves[0].name, QString("Apple"));
-    QCOMPARE(result[0].leaves[0].value, 10.0);
-}
-
-void TreeManagerTest::filterWithoutFilters()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node 1'), ('Node 2')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'Apple', 10.0), "
-        "       (1, 'Banana', 20.0), "
-        "       (2, 'Orange', 30.0)"));
-
-    QVERIFY(manager_->load());
-
-    const QVector<NodeData> result =
-        manager_->filter("", "");
-
-    QCOMPARE(result.size(), 2);
-    QCOMPARE(result[0].leaves.size(), 2);
-    QCOMPARE(result[1].leaves.size(), 1);
-}
-
-void TreeManagerTest::nodeCount()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) "
-        "VALUES ('Node 1'), ('Node 2'), ('Node 3')"));
-
-    QVERIFY(manager_->load());
-
-    QCOMPARE(manager_->nodeCount(), 3);
-}
-
-void TreeManagerTest::leafCount()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) "
-        "VALUES ('Node 1'), ('Node 2')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'A', 10.0), "
-        "       (1, 'B', 20.0), "
-        "       (2, 'C', 30.0)"));
-
-    QVERIFY(manager_->load());
-
-    QCOMPARE(manager_->leafCount(), 3);
-}
-
-void TreeManagerTest::minimumValue()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'A', 10.0), "
-        "       (1, 'B', -5.5), "
-        "       (1, 'C', 20.0), "
-        "       (1, 'D', 3.14)"));
-
-    QVERIFY(manager_->load());
-
-    QCOMPARE(manager_->minimumValue(), -5.5);
-}
-
-void TreeManagerTest::maximumValue()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'A', 10.0), "
-        "       (1, 'B', -5.5), "
-        "       (1, 'C', 20.0), "
-        "       (1, 'D', 3.14)"));
-
-    QVERIFY(manager_->load());
-
-    QCOMPARE(manager_->maximumValue(), 20.0);
-}
-
-void TreeManagerTest::addAndDeleteLeaf()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node')"));
-
-    QVERIFY(manager_->load());
-
-    QVERIFY(manager_->addLeaf(
-        1,
-        "Test leaf",
-        42.5));
-
-    QCOMPARE(manager_->leafCount(), 1);
-    QCOMPARE(manager_->nodes()[0].leaves[0].name, QString("Test leaf"));
-    QCOMPARE(manager_->nodes()[0].leaves[0].value, 42.5);
-
-    const int leafId = manager_->nodes()[0].leaves[0].id;
-
-    QVERIFY(manager_->deleteLeaf(leafId));
-
-    QCOMPARE(manager_->leafCount(), 0);
-}
-
-void TreeManagerTest::updateLeaf()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) VALUES ('Node')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'Old name', 10.0)"));
-
-    QVERIFY(manager_->load());
-
-    const int leafId = manager_->nodes()[0].leaves[0].id;
-
-    QVERIFY(manager_->updateLeaf(
-        leafId,
-        "New name",
-        99.5));
-
-    QCOMPARE(manager_->nodes()[0].leaves[0].name, QString("New name"));
-    QCOMPARE(manager_->nodes()[0].leaves[0].value, 99.5);
-
-    QSqlQuery checkQuery(database_);
-
-    QVERIFY(checkQuery.exec(
-        "SELECT name, value "
-        "FROM leaves "
-        "WHERE id = 1"));
-
-    QVERIFY(checkQuery.next());
-
-    QCOMPARE(
-        checkQuery.value("name").toString(),
-        QString("New name"));
-
-    QCOMPARE(
-        checkQuery.value("value").toDouble(),
-        99.5);
-}
-
-void TreeManagerTest::deleteNodeWithLeaves()
-{
-    QSqlQuery query(database_);
-
-    QVERIFY(query.exec(
-        "INSERT INTO nodes (name) "
-        "VALUES ('Node 1'), ('Node 2')"));
-
-    QVERIFY(query.exec(
-        "INSERT INTO leaves (node_id, name, value) "
-        "VALUES (1, 'A', 10.0), "
-        "       (1, 'B', 20.0), "
-        "       (2, 'C', 30.0)"));
-
-    QVERIFY(manager_->load());
-
-    QCOMPARE(manager_->nodeCount(), 2);
-    QCOMPARE(manager_->leafCount(), 3);
-
-    QVERIFY(manager_->deleteNode(1));
-
-    QCOMPARE(manager_->nodeCount(), 1);
-    QCOMPARE(manager_->leafCount(), 1);
-
-    QCOMPARE(manager_->nodes()[0].id, 2);
-    QCOMPARE(manager_->nodes()[0].leaves[0].name, QString("C"));
-
-    QSqlQuery checkQuery(database_);
-
-    QVERIFY(checkQuery.exec(
-        "SELECT COUNT(*) "
-        "FROM leaves "
-        "WHERE node_id = 1"));
-
-    QVERIFY(checkQuery.next());
-
-    QCOMPARE(checkQuery.value(0).toInt(), 0);
-}
+private slots:
+    void initTestCase()
+    {
+        database_ = QSqlDatabase::addDatabase("QPSQL", "test_connection");
+        database_.setHostName(qEnvironmentVariable("TEST_DB_HOST"));
+        database_.setPort(qEnvironmentVariableIntValue("TEST_DB_PORT"));
+        database_.setDatabaseName(qEnvironmentVariable("TEST_DB_NAME"));
+        database_.setUserName(qEnvironmentVariable("TEST_DB_USER"));
+        database_.setPassword(qEnvironmentVariable("TEST_DB_PASSWORD"));
+
+        if (!database_.open())
+        {
+            qFatal(
+                "Database connection failed: %s",
+                qPrintable(
+                    database_.lastError().text()));
+        }
+
+        createTables();
+    }
+
+    void cleanupTestCase()
+    {
+        database_.close();
+        QSqlDatabase::removeDatabase(connectionName_);
+    }
+
+    void init()
+    {
+        QSqlQuery query(database_);
+        query.exec("TRUNCATE leaves, nodes RESTART IDENTITY CASCADE");
+    }
+
+    void testAddNode()
+    {
+        TreeRepository repository(database_);
+        TreeManager manager(repository);
+
+        QSignalSpy aboutSpy(
+            &manager,
+            &TreeManager::nodeAboutToBeAdded);
+
+        QSignalSpy addedSpy(
+            &manager,
+            &TreeManager::nodeAdded);
+
+        QVERIFY(manager.load());
+
+        QVERIFY(manager.addNode("Engine"));
+
+        QCOMPARE(manager.nodeCount(), 1);
+
+        QCOMPARE(
+            aboutSpy.count(),
+            1);
+
+        QCOMPARE(
+            addedSpy.count(),
+            1);
+
+        QCOMPARE(
+            manager.nodes()[0].name,
+            QString("Engine"));
+    }
+
+    void testAddLeaf()
+    {
+        TreeRepository repository(database_);
+        TreeManager manager(repository);
+
+        QVERIFY(manager.load());
+
+        QVERIFY(manager.addNode("Motor"));
+
+        int nodeId = manager.nodes()[0].id;
+
+        QSignalSpy spy(
+            &manager,
+            &TreeManager::leafAdded);
+
+        QVERIFY(
+            manager.addLeaf(
+                nodeId,
+                "Temperature",
+                85.5));
+
+        QCOMPARE(
+            manager.leafCount(),
+            1);
+
+        QCOMPARE(
+            spy.count(),
+            1);
+
+        const LeafData &leaf = manager.nodes()[0].leaves[0];
+
+        QCOMPARE(
+            leaf.name,
+            QString("Temperature"));
+
+        QCOMPARE(
+            leaf.value,
+            85.5);
+    }
+
+    void testUpdateLeaf()
+    {
+        TreeRepository repository(database_);
+        TreeManager manager(repository);
+
+        QVERIFY(manager.load());
+
+        QVERIFY(
+            manager.addNode("Node"));
+
+        int nodeId = manager.nodes()[0].id;
+
+        QVERIFY(
+            manager.addLeaf(
+                nodeId,
+                "Value",
+                10));
+
+        int leafId =
+            manager.nodes()[0]
+                .leaves[0]
+                .id;
+
+        QSignalSpy spy(
+            &manager,
+            &TreeManager::leafChanged);
+
+        QVERIFY(
+            manager.updateLeaf(
+                leafId,
+                "NewValue",
+                20));
+
+        QCOMPARE(
+            spy.count(),
+            1);
+
+        QCOMPARE(
+            manager.nodes()[0]
+                .leaves[0]
+                .name,
+            QString("NewValue"));
+
+        QCOMPARE(
+            manager.nodes()[0]
+                .leaves[0]
+                .value,
+            20.0);
+    }
+
+    void testDeleteLeaf()
+    {
+        TreeRepository repository(database_);
+        TreeManager manager(repository);
+
+        QVERIFY(manager.load());
+
+        QVERIFY(
+            manager.addNode("Node"));
+
+        int nodeId = manager.nodes()[0].id;
+
+        QVERIFY(
+            manager.addLeaf(
+                nodeId,
+                "Leaf",
+                5));
+
+        int leafId =
+            manager.nodes()[0]
+                .leaves[0]
+                .id;
+
+        QSignalSpy spy(
+            &manager,
+            &TreeManager::leafRemoved);
+
+        QVERIFY(
+            manager.deleteLeaf(
+                leafId));
+
+        QCOMPARE(
+            manager.leafCount(),
+            0);
+
+        QCOMPARE(
+            spy.count(),
+            1);
+    }
+
+    void testDeleteNode()
+    {
+        TreeRepository repository(database_);
+        TreeManager manager(repository);
+
+        QVERIFY(manager.load());
+
+        QVERIFY(
+            manager.addNode("Node"));
+
+        int id = manager.nodes()[0].id;
+
+        QSignalSpy spy(
+            &manager,
+            &TreeManager::nodeRemoved);
+
+        QVERIFY(
+            manager.deleteNode(id));
+
+        QCOMPARE(
+            manager.nodeCount(),
+            0);
+
+        QCOMPARE(
+            spy.count(),
+            1);
+    }
+
+    void testStatistics()
+    {
+        TreeRepository repository(database_);
+        TreeManager manager(repository);
+
+        QVERIFY(manager.load());
+
+        manager.addNode("A");
+        manager.addNode("B");
+
+        QVERIFY(
+            manager.addLeaf(
+                manager.nodes()[0].id,
+                "L1",
+                50));
+
+        QVERIFY(
+            manager.addLeaf(
+                manager.nodes()[1].id,
+                "L2",
+                10));
+
+        QVERIFY(
+            manager.addLeaf(
+                manager.nodes()[1].id,
+                "L3",
+                100));
+
+        QCOMPARE(
+            manager.nodeCount(),
+            2);
+
+        QCOMPARE(
+            manager.leafCount(),
+            3);
+
+        QCOMPARE(
+            manager.minimumValue(),
+            10.0);
+
+        QCOMPARE(
+            manager.maximumValue(),
+            100.0);
+    }
+
+    void testJsonExportImport()
+    {
+        TreeRepository repository(database_);
+        TreeManager manager(repository);
+
+        QVERIFY(manager.load());
+
+        manager.addNode("Node");
+
+        QVERIFY(
+            manager.addLeaf(
+                manager.nodes()[0].id,
+                "Value",
+                42));
+
+        QTemporaryDir dir;
+
+        QString file = dir.filePath("tree.json");
+
+        QVERIFY(
+            manager.exportJson(file));
+
+        QVERIFY(
+            manager.importJson(file));
+
+        QCOMPARE(
+            manager.nodeCount(),
+            1);
+
+        QCOMPARE(
+            manager.leafCount(),
+            1);
+
+        QCOMPARE(
+            manager.nodes()[0]
+                .leaves[0]
+                .value,
+            42.0);
+    }
+};
 
 QTEST_MAIN(TreeManagerTest)
 

@@ -13,56 +13,53 @@ bool TreeRepository::loadTree(QVector<NodeData> &nodes) const
 {
     nodes.clear();
 
-    QSqlQuery nodeQuery(database_);
+    QSqlQuery query(database_);
 
-    if (!nodeQuery.exec(
-        "SELECT id, name "
-        "FROM nodes "
-        "ORDER BY id"))
+    if (!query.exec(
+        "SELECT "
+        "    n.id AS node_id, "
+        "    n.name AS node_name, "
+        "    l.id AS leaf_id, "
+        "    l.node_id AS leaf_node_id, "
+        "    l.name AS leaf_name, "
+        "    l.value AS leaf_value "
+        "FROM nodes n "
+        "LEFT JOIN leaves l ON l.node_id = n.id "
+        "ORDER BY n.id, l.id"))
     {
-        lastError_ = nodeQuery.lastError().text();
-        qDebug() << "Failed to load nodes:" << lastError_;
+        lastError_ = query.lastError().text();
+        qDebug() << "Failed to load tree:" << lastError_;
         return false;
     }
 
-    while (nodeQuery.next())
+    int currentNodeIndex = -1;
+
+    while (query.next())
     {
-        NodeData node;
+        const int nodeId = query.value("node_id").toInt();
 
-        node.id = nodeQuery.value("id").toInt();
-        node.name = nodeQuery.value("name").toString();
-
-        QSqlQuery leafQuery(database_);
-
-        leafQuery.prepare(
-            "SELECT id, node_id, name, value "
-            "FROM leaves "
-            "WHERE node_id = :node_id "
-            "ORDER BY id");
-
-        leafQuery.bindValue(":node_id", node.id);
-
-        if (!leafQuery.exec())
+        if (currentNodeIndex == -1 || nodes[currentNodeIndex].id != nodeId)
         {
-            lastError_ = leafQuery.lastError().text();
-            qDebug() << "Failed to load leaves for node"
-                << node.id << ":" << lastError_;
-            return false;
+            NodeData node;
+
+            node.id = nodeId;
+            node.name = query.value("node_name").toString();
+
+            nodes.append(node);
+            currentNodeIndex = nodes.size() - 1;
         }
 
-        while (leafQuery.next())
+        if (!query.value("leaf_id").isNull())
         {
             LeafData leaf;
 
-            leaf.id = leafQuery.value("id").toInt();
-            leaf.nodeId = leafQuery.value("node_id").toInt();
-            leaf.name = leafQuery.value("name").toString();
-            leaf.value = leafQuery.value("value").toDouble();
+            leaf.id = query.value("leaf_id").toInt();
+            leaf.nodeId = query.value("leaf_node_id").toInt();
+            leaf.name = query.value("leaf_name").toString();
+            leaf.value = query.value("leaf_value").toDouble();
 
-            node.leaves.append(leaf);
+            nodes[currentNodeIndex].leaves.append(leaf);
         }
-
-        nodes.append(node);
     }
 
     lastError_.clear();

@@ -9,7 +9,7 @@
 #include <QFileDialog>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
+    : QMainWindow(parent), treeModel_(treeManager_.nodes())
 {
     setupUi();
     setupConnections();
@@ -21,7 +21,7 @@ void MainWindow::setupUi()
     auto *mainLayout = new QVBoxLayout(centralWidget);
 
     connectionPanel_ = new ConnectionPanel(centralWidget);
-    treePanel_ = new TreePanel(centralWidget);
+    treePanel_ = new TreePanel(&treeModel_, centralWidget);
     actionPanel_ = new ActionPanel(centralWidget);
     filterPanel_ = new FilterPanel(centralWidget);
     filePanel_ = new FilePanel(centralWidget);
@@ -42,6 +42,60 @@ void MainWindow::setupUi()
 
 void MainWindow::setupConnections()
 {
+    connect(
+        &treeManager_,
+        &TreeManager::nodeAboutToBeAdded,
+        &treeModel_,
+        &TreeModel::nodeAboutToBeAdded);
+
+    connect(
+        &treeManager_,
+        &TreeManager::nodeAdded,
+        &treeModel_,
+        &TreeModel::nodeAdded);
+
+    connect(
+        &treeManager_,
+        &TreeManager::nodeAboutToBeRemoved,
+        &treeModel_,
+        &TreeModel::nodeAboutToBeRemoved);
+
+    connect(
+        &treeManager_,
+        &TreeManager::nodeRemoved,
+        &treeModel_,
+        &TreeModel::nodeRemoved);
+
+    connect(
+        &treeManager_,
+        &TreeManager::leafAboutToBeAdded,
+        &treeModel_,
+        &TreeModel::leafAboutToBeAdded);
+
+    connect(
+        &treeManager_,
+        &TreeManager::leafAdded,
+        &treeModel_,
+        &TreeModel::leafAdded);
+
+    connect(
+        &treeManager_,
+        &TreeManager::leafAboutToBeRemoved,
+        &treeModel_,
+        &TreeModel::leafAboutToBeRemoved);
+
+    connect(
+        &treeManager_,
+        &TreeManager::leafRemoved,
+        &treeModel_,
+        &TreeModel::leafRemoved);
+
+    connect(
+        &treeManager_,
+        &TreeManager::leafChanged,
+        &treeModel_,
+        &TreeModel::leafChanged);
+
     connect(
         connectionPanel_,
         &ConnectionPanel::connectClicked,
@@ -136,7 +190,8 @@ void MainWindow::onConnectClicked()
         return;
     }
 
-    treePanel_->setNodes(treeManager_.nodes());
+    treeModel_.reset();
+    treePanel_->treeView()->expandAll();
 
     updateStatistics();
 }
@@ -145,7 +200,11 @@ void MainWindow::onAddNodeClicked()
 {
     if (!databaseManager_.isConnected())
     {
-        QMessageBox::warning(this, "Нет соединения", "Сначала подключитесь к базе данных.");
+        QMessageBox::warning(
+            this,
+            "Нет соединения",
+            "Сначала подключитесь к базе данных.");
+
         return;
     }
 
@@ -159,12 +218,12 @@ void MainWindow::onAddNodeClicked()
         {},
         &ok);
 
-    if (!ok || name.trimmed().isEmpty()) 
+    if (!ok || name.trimmed().isEmpty())
     {
         return;
     }
 
-    if (!treeManager_.addNode(name.trimmed())) 
+    if (!treeManager_.addNode(name.trimmed()))
     {
         QMessageBox::critical(
             this,
@@ -174,8 +233,6 @@ void MainWindow::onAddNodeClicked()
         return;
     }
 
-    treePanel_->addNode(treeManager_.nodes().last());
-
     updateStatistics();
 }
 
@@ -183,13 +240,17 @@ void MainWindow::onDeleteNodeClicked()
 {
     if (!databaseManager_.isConnected())
     {
-        QMessageBox::warning(this, "Нет соединения", "Сначала подключитесь к базе данных.");
+        QMessageBox::warning(
+            this,
+            "Нет соединения",
+            "Сначала подключитесь к базе данных.");
+
         return;
     }
 
     const QModelIndex index = treePanel_->currentIndex();
 
-    if (!index.isValid() || index.parent().isValid()) 
+    if (!index.isValid() || index.parent().isValid())
     {
         QMessageBox::warning(
             this,
@@ -199,26 +260,28 @@ void MainWindow::onDeleteNodeClicked()
         return;
     }
 
-    auto *node = static_cast<NodeData*>(index.internalPointer());
+    const int row = index.row();
 
-    if (!node) 
+    const QVector<NodeData>& nodes = treeManager_.nodes();
+
+    if (row < 0 || row >= nodes.size())
     {
         return;
     }
+
+    const int nodeId = nodes[row].id;
 
     const auto result = QMessageBox::question(
         this,
         "Удаление узла",
         "Удалить выбранный узел и все его листья?");
 
-    if (result != QMessageBox::Yes) 
+    if (result != QMessageBox::Yes)
     {
         return;
     }
 
-    const int row = index.row();
-
-    if (!treeManager_.deleteNode(node->id)) 
+    if (!treeManager_.deleteNode(nodeId))
     {
         QMessageBox::critical(
             this,
@@ -228,8 +291,6 @@ void MainWindow::onDeleteNodeClicked()
         return;
     }
 
-    treePanel_->removeNode(row);
-
     updateStatistics();
 }
 
@@ -237,13 +298,17 @@ void MainWindow::onAddLeafClicked()
 {
     if (!databaseManager_.isConnected())
     {
-        QMessageBox::warning(this, "Нет соединения", "Сначала подключитесь к базе данных.");
+        QMessageBox::warning(
+            this,
+            "Нет соединения",
+            "Сначала подключитесь к базе данных.");
+
         return;
     }
 
     const QModelIndex index = treePanel_->currentIndex();
 
-    if (!index.isValid()) 
+    if (!index.isValid())
     {
         QMessageBox::warning(
             this,
@@ -253,19 +318,18 @@ void MainWindow::onAddLeafClicked()
         return;
     }
 
-    QModelIndex nodeIndex = index;
+    const int nodeRow = index.parent().isValid()
+        ? index.parent().row()
+        : index.row();
 
-    if (index.parent().isValid()) 
-    {
-        nodeIndex = index.parent();
-    }
+    const QVector<NodeData> &nodes = treeManager_.nodes();
 
-    auto *node = static_cast<NodeData*>(nodeIndex.internalPointer());
-
-    if (!node) 
+    if (nodeRow < 0 || nodeRow >= nodes.size())
     {
         return;
     }
+
+    const int nodeId = nodes[nodeRow].id;
 
     bool ok = false;
 
@@ -277,7 +341,7 @@ void MainWindow::onAddLeafClicked()
         {},
         &ok);
 
-    if (!ok || name.trimmed().isEmpty()) 
+    if (!ok || name.trimmed().isEmpty())
     {
         return;
     }
@@ -292,15 +356,15 @@ void MainWindow::onAddLeafClicked()
         6,
         &ok);
 
-    if (!ok) 
+    if (!ok)
     {
         return;
     }
 
     if (!treeManager_.addLeaf(
-        node->id,
+        nodeId,
         name.trimmed(),
-        value)) 
+        value))
     {
         QMessageBox::critical(
             this,
@@ -310,10 +374,6 @@ void MainWindow::onAddLeafClicked()
         return;
     }
 
-    treePanel_->addLeaf(
-        nodeIndex.row(),
-        treeManager_.nodes()[nodeIndex.row()].leaves.last());
-
     updateStatistics();
 }
 
@@ -321,13 +381,17 @@ void MainWindow::onDeleteLeafClicked()
 {
     if (!databaseManager_.isConnected())
     {
-        QMessageBox::warning(this, "Нет соединения", "Сначала подключитесь к базе данных.");
+        QMessageBox::warning(
+            this,
+            "Нет соединения",
+            "Сначала подключитесь к базе данных.");
+
         return;
     }
 
     const QModelIndex index = treePanel_->currentIndex();
 
-    if (!index.isValid() || !index.parent().isValid()) 
+    if (!index.isValid() || !index.parent().isValid())
     {
         QMessageBox::warning(
             this,
@@ -337,27 +401,36 @@ void MainWindow::onDeleteLeafClicked()
         return;
     }
 
-    auto *leaf = static_cast<LeafData*>(index.internalPointer());
+    const int nodeRow = index.parent().row();
+    const int leafRow = index.row();
 
-    if (!leaf) 
+    const QVector<NodeData>& nodes = treeManager_.nodes();
+
+    if (nodeRow < 0 || nodeRow >= nodes.size())
     {
         return;
     }
+
+    const NodeData& node = nodes[nodeRow];
+
+    if (leafRow < 0 || leafRow >= node.leaves.size())
+    {
+        return;
+    }
+
+    const int leafId = node.leaves[leafRow].id;
 
     const auto result = QMessageBox::question(
         this,
         "Удаление листа",
         "Удалить выбранный лист?");
 
-    if (result != QMessageBox::Yes) 
+    if (result != QMessageBox::Yes)
     {
         return;
     }
 
-    const int nodeRow = index.parent().row();
-    const int leafRow = index.row();
-
-    if (!treeManager_.deleteLeaf(leaf->id)) 
+    if (!treeManager_.deleteLeaf(leafId))
     {
         QMessageBox::critical(
             this,
@@ -367,8 +440,6 @@ void MainWindow::onDeleteLeafClicked()
         return;
     }
 
-    treePanel_->removeLeaf(nodeRow, leafRow);
-
     updateStatistics();
 }
 
@@ -376,13 +447,17 @@ void MainWindow::onEditClicked()
 {
     if (!databaseManager_.isConnected())
     {
-        QMessageBox::warning(this, "Нет соединения", "Сначала подключитесь к базе данных.");
+        QMessageBox::warning(
+            this,
+            "Нет соединения",
+            "Сначала подключитесь к базе данных.");
+
         return;
     }
 
     const QModelIndex index = treePanel_->currentIndex();
 
-    if (!index.isValid() || !index.parent().isValid()) 
+    if (!index.isValid() || !index.parent().isValid())
     {
         QMessageBox::warning(
             this,
@@ -392,12 +467,24 @@ void MainWindow::onEditClicked()
         return;
     }
 
-    auto *leaf = static_cast<LeafData*>(index.internalPointer());
+    const int nodeRow = index.parent().row();
+    const int leafRow = index.row();
 
-    if (!leaf) 
+    const QVector<NodeData>& nodes = treeManager_.nodes();
+
+    if (nodeRow < 0 || nodeRow >= nodes.size())
     {
         return;
     }
+
+    const NodeData& node = nodes[nodeRow];
+
+    if (leafRow < 0 || leafRow >= node.leaves.size())
+    {
+        return;
+    }
+
+    const LeafData& leaf = node.leaves[leafRow];
 
     bool ok = false;
 
@@ -406,10 +493,10 @@ void MainWindow::onEditClicked()
         "Редактировать лист",
         "Название:",
         QLineEdit::Normal,
-        leaf->name,
+        leaf.name,
         &ok);
 
-    if (!ok || name.trimmed().isEmpty()) 
+    if (!ok || name.trimmed().isEmpty())
     {
         return;
     }
@@ -418,21 +505,21 @@ void MainWindow::onEditClicked()
         this,
         "Редактировать лист",
         "Значение:",
-        leaf->value,
+        leaf.value,
         -1e100,
         1e100,
         6,
         &ok);
 
-    if (!ok) 
+    if (!ok)
     {
         return;
     }
 
     if (!treeManager_.updateLeaf(
-        leaf->id,
+        leaf.id,
         name.trimmed(),
-        value)) 
+        value))
     {
         QMessageBox::critical(
             this,
@@ -442,24 +529,13 @@ void MainWindow::onEditClicked()
         return;
     }
 
-    LeafData updatedLeaf = *leaf;
-    updatedLeaf.name = name.trimmed();
-    updatedLeaf.value = value;
-
-    treePanel_->updateLeaf(
-        index.parent().row(),
-        index.row(),
-        updatedLeaf);
-
     updateStatistics();
 }
 
 void MainWindow::onFilterChanged()
 {
-    treePanel_->setNodes(
-        treeManager_.filter(
-            filterPanel_->nameFilter(),
-            filterPanel_->valueFilter()));
+    treePanel_->setNameFilter(filterPanel_->nameFilter());
+    treePanel_->setValueFilter(filterPanel_->valueFilter());
 }
 
 void MainWindow::onResetFilters()
@@ -499,9 +575,13 @@ void MainWindow::onExportClicked()
 
 void MainWindow::onImportClicked()
 {
-    if (!databaseManager_.isConnected()) 
+    if (!databaseManager_.isConnected())
     {
-        QMessageBox::warning(this, "Нет соединения", "Сначала подключитесь к базе данных.");
+        QMessageBox::warning(
+            this,
+            "Нет соединения",
+            "Сначала подключитесь к базе данных.");
+
         return;
     }
 
@@ -526,7 +606,8 @@ void MainWindow::onImportClicked()
         return;
     }
 
-    treePanel_->setNodes(treeManager_.nodes());
+    treeModel_.reset();
+    treePanel_->treeView()->expandAll();
 
     updateStatistics();
 }

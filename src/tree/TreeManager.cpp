@@ -7,8 +7,11 @@
 
 #include <utility>
 
-TreeManager::TreeManager(TreeRepository &repository)
-    : repository_(repository)
+TreeManager::TreeManager(
+    TreeRepository &repository,
+    QObject *parent)
+    : QObject(parent),
+      repository_(repository)
 {
 }
 
@@ -16,7 +19,7 @@ bool TreeManager::load()
 {
     QVector<NodeData> nodes;
 
-    if (!repository_.loadTree(nodes)) 
+    if (!repository_.loadTree(nodes))
     {
         lastError_ = repository_.lastError();
         return false;
@@ -43,7 +46,7 @@ bool TreeManager::addNode(const QString &name)
 {
     int nodeId = 0;
 
-    if (!repository_.addNode(name, nodeId)) 
+    if (!repository_.addNode(name, nodeId))
     {
         lastError_ = repository_.lastError();
         return false;
@@ -53,7 +56,13 @@ bool TreeManager::addNode(const QString &name)
     node.id = nodeId;
     node.name = name;
 
+    const int row = nodes_.size();
+
+    emit nodeAboutToBeAdded(row);
+
     nodes_.append(node);
+
+    emit nodeAdded();
 
     lastError_.clear();
 
@@ -62,20 +71,24 @@ bool TreeManager::addNode(const QString &name)
 
 bool TreeManager::deleteNode(int nodeId)
 {
-    for (int i = 0; i < nodes_.size(); ++i) 
+    for (int row = 0; row < nodes_.size(); ++row)
     {
-        if (nodes_[i].id != nodeId) 
+        if (nodes_[row].id != nodeId)
         {
             continue;
         }
 
-        if (!repository_.deleteNode(nodeId)) 
+        if (!repository_.deleteNode(nodeId))
         {
             lastError_ = repository_.lastError();
             return false;
         }
 
-        nodes_.removeAt(i);
+        emit nodeAboutToBeRemoved(row);
+
+        nodes_.removeAt(row);
+
+        emit nodeRemoved();
 
         lastError_.clear();
 
@@ -92,9 +105,13 @@ bool TreeManager::addLeaf(
     const QString &name,
     double value)
 {
-    for (NodeData &node : nodes_) 
+    for (int nodeRow = 0;
+        nodeRow < nodes_.size();
+        ++nodeRow)
     {
-        if (node.id != nodeId) 
+        NodeData &node = nodes_[nodeRow];
+
+        if (node.id != nodeId)
         {
             continue;
         }
@@ -105,7 +122,7 @@ bool TreeManager::addLeaf(
             nodeId,
             name,
             value,
-            leafId)) 
+            leafId))
         {
             lastError_ = repository_.lastError();
             return false;
@@ -117,7 +134,15 @@ bool TreeManager::addLeaf(
         leaf.name = name;
         leaf.value = value;
 
+        const int leafRow = node.leaves.size();
+
+        emit leafAboutToBeAdded(
+            nodeRow,
+            leafRow);
+
         node.leaves.append(leaf);
+
+        emit leafAdded();
 
         lastError_.clear();
 
@@ -131,22 +156,34 @@ bool TreeManager::addLeaf(
 
 bool TreeManager::deleteLeaf(int leafId)
 {
-    for (NodeData &node : nodes_) 
+    for (int nodeRow = 0;
+        nodeRow < nodes_.size();
+        ++nodeRow)
     {
-        for (int i = 0; i < node.leaves.size(); ++i) 
+        NodeData &node = nodes_[nodeRow];
+
+        for (int leafRow = 0;
+            leafRow < node.leaves.size();
+            ++leafRow)
         {
-            if (node.leaves[i].id != leafId) 
+            if (node.leaves[leafRow].id != leafId)
             {
                 continue;
             }
 
-            if (!repository_.deleteLeaf(leafId)) 
+            if (!repository_.deleteLeaf(leafId))
             {
                 lastError_ = repository_.lastError();
                 return false;
             }
 
-            node.leaves.removeAt(i);
+            emit leafAboutToBeRemoved(
+                nodeRow,
+                leafRow);
+
+            node.leaves.removeAt(leafRow);
+
+            emit leafRemoved();
 
             lastError_.clear();
 
@@ -164,10 +201,18 @@ bool TreeManager::updateLeaf(
     const QString &name,
     double value)
 {
-    for (NodeData &node : nodes_)
+    for (int nodeRow = 0;
+        nodeRow < nodes_.size();
+        ++nodeRow)
     {
-        for (LeafData &leaf : node.leaves)
+        NodeData &node = nodes_[nodeRow];
+
+        for (int leafRow = 0;
+            leafRow < node.leaves.size();
+            ++leafRow)
         {
+            LeafData &leaf = node.leaves[leafRow];
+
             if (leaf.id != leafId)
             {
                 continue;
@@ -185,6 +230,10 @@ bool TreeManager::updateLeaf(
             leaf.name = name;
             leaf.value = value;
 
+            emit leafChanged(
+                nodeRow,
+                leafRow);
+
             lastError_.clear();
 
             return true;
@@ -194,55 +243,6 @@ bool TreeManager::updateLeaf(
     lastError_ = "Лист не найден";
 
     return false;
-}
-
-QVector<NodeData> TreeManager::filter(
-    const std::function<bool(const LeafData&)> &predicate) const
-{
-    QVector<NodeData> result;
-
-    for (const NodeData &node : nodes_)
-    {
-        NodeData filteredNode;
-        filteredNode.id = node.id;
-        filteredNode.name = node.name;
-
-        for (const LeafData &leaf : node.leaves)
-        {
-            if (predicate(leaf))
-            {
-                filteredNode.leaves.append(leaf);
-            }
-        }
-
-        if (!filteredNode.leaves.isEmpty())
-        {
-            result.append(filteredNode);
-        }
-    }
-
-    return result;
-}
-
-QVector<NodeData> TreeManager::filter(
-    const QString &nameText,
-    const QString &valueText) const
-{
-    return filter(
-        [&nameText, &valueText](const LeafData &leaf)
-        {
-            const bool nameMatches =
-                nameText.isEmpty() ||
-                leaf.name.contains(nameText, Qt::CaseInsensitive);
-
-            const QString value = QString::number(leaf.value, 'g', 15);
-
-            const bool valueMatches =
-                valueText.isEmpty() ||
-                value.contains(valueText);
-
-            return nameMatches && valueMatches;
-        });
 }
 
 int TreeManager::nodeCount() const

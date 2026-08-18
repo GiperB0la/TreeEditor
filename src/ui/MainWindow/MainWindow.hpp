@@ -1,16 +1,17 @@
 #pragma once
 #include <QMainWindow>
 
-#include "ConnectionPanel/ConnectionPanel.hpp"
-#include "TreePanel/TreePanel.hpp"
-#include "ActionPanel/ActionPanel.hpp"
-#include "FilterPanel/FilterPanel.hpp"
-#include "FilePanel/FilePanel.hpp"
-#include "StatisticsPanel/StatisticsPanel.hpp"
+#include "../widgets/ConnectionPanel/ConnectionPanel.hpp"
+#include "../widgets/TreePanel/TreePanel.hpp"
+#include "../widgets/ActionPanel/ActionPanel.hpp"
+#include "../widgets/FilterPanel/FilterPanel.hpp"
+#include "../widgets/FilePanel/FilePanel.hpp"
+#include "../widgets/StatisticsPanel/StatisticsPanel.hpp"
 
-#include "../database/DatabaseManager.hpp"
-#include "../database/TreeRepository.hpp"
-#include "../tree/TreeManager.hpp"
+#include "../../database/DatabaseManager.hpp"
+#include "../../database/TreeRepository.hpp"
+#include "../../tree/TreeManager.hpp"
+#include "../models/TreeModel.hpp"
 
 class MainWindow : public QMainWindow
 {
@@ -54,4 +55,5 @@ private:
     TreeManager treeManager_{
         treeRepository_
     };
+    TreeModel treeModel_;
 };
